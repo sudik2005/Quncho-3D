@@ -9,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Spatial Adventure Visualizer | 3D GPS Dashboard",
+  title: "Quncho | 3D GPS Visualizer",
   description:
-    "Immersive 3D web dashboard for visualizing GPS training data from GPX files. Explore your routes in stunning 3D terrain with elevation profiles and detailed statistics.",
+    "Immersive 3D web dashboard for visualizing GPS tracks with altitude profiling and training stats. Proudly built for peak spatial adventure.",
   keywords: [
     "GPS",
     "GPX",

@@ -80,8 +80,8 @@ export default function Dashboard() {
                             <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#0a0a0f] animate-pulse" />
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent">
-                                Spatial Adventure
+                            <h1 className="text-xl font-black tracking-tighter bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent">
+                                QUNCHO
                             </h1>
                             <p className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-medium">
                                 3D GPS Visualizer
