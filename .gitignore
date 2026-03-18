@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+sample_hike.gpx
 
 # debug
 npm-debug.log*
