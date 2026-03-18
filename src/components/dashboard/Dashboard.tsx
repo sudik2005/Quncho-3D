@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import { Mountain, Compass } from "lucide-react";
@@ -35,8 +35,18 @@ export default function Dashboard() {
 
         try {
             const data = await parseGpxFile(file);
-            const profile = generateElevationProfile(data.points);
+            
+            // --- Fallback logic for files like Google Maps (Driving) ---
+            // If duration is 0 (no timestamps), estimate it based on 60km/h for driving, or 5km/h for walking
+            if (data.duration === 0 && data.totalDistance > 0) {
+              const isDriving = data.name.toLowerCase().includes("driving");
+              const avgSpeedKmh = isDriving ? 60 : 5;
+              const estimatedSeconds = (data.totalDistance / avgSpeedKmh) * 3600;
+              data.duration = estimatedSeconds;
+              data.estimatedPace = estimatedSeconds / 60 / data.totalDistance;
+            }
 
+            const profile = generateElevationProfile(data.points);
             setTrackData(data);
             setElevationData(profile);
             setFileName(file.name);
@@ -45,6 +55,18 @@ export default function Dashboard() {
         } finally {
             setIsLoading(false);
         }
+    }, []);
+
+    // --- Listen for map-enrichment (elevation lookup) ---
+    useEffect(() => {
+        const handleEnrichment = (e: any) => {
+            const enrichedData = e.detail as GpxTrackData;
+            const enrichedProfile = generateElevationProfile(enrichedData.points);
+            setTrackData(enrichedData);
+            setElevationData(enrichedProfile);
+        };
+        window.addEventListener("enrich-track", handleEnrichment);
+        return () => window.removeEventListener("enrich-track", handleEnrichment);
     }, []);
 
     const loadSample = useCallback(async () => {

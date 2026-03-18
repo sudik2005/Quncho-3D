@@ -242,10 +242,6 @@ export default function MapViewport({ trackData }: MapViewportProps) {
 
             // Fly to the start of the route with 3D perspective
             if (data.startPoint) {
-                // Calculate bounds
-                const bounds = new maplibregl.LngLatBounds();
-                data.points.forEach((p) => bounds.extend([p.lon, p.lat]));
-
                 mapInstance.flyTo({
                     center: [data.startPoint.lon, data.startPoint.lat],
                     zoom: 13,
@@ -254,6 +250,46 @@ export default function MapViewport({ trackData }: MapViewportProps) {
                     duration: 3000,
                     essential: true,
                 });
+
+                // --- NEW: Elevation Backfilling Logic ---
+                // If the file has 0 elevation gain, try to find the elevation using the map's terrain data
+                if (data.elevationGain === 0) {
+                    // We wait a tiny bit for terrain to load
+                    setTimeout(() => {
+                        let totalGain = 0;
+                        let totalLoss = 0;
+                        let maxEle = -Infinity;
+                        let lastEle: number | null = null;
+
+                        const enrichedPoints = data.points.map((p) => {
+                            const mapEle = mapInstance.queryTerrainElevation([p.lon, p.lat]) || 0;
+                            if (mapEle > maxEle) maxEle = mapEle;
+                            
+                            if (lastEle !== null) {
+                                const diff = mapEle - lastEle;
+                                if (diff > 0) totalGain += diff;
+                                else totalLoss += Math.abs(diff);
+                            }
+                            lastEle = mapEle;
+                            return { ...p, ele: mapEle };
+                        });
+
+                        // Notify parent with enriched data (Distance/Time remain same)
+                        // This dynamically fixes "Empty Elevation" files like Google Maps exports
+                        if (totalGain > 0) {
+                          const event = new CustomEvent("enrich-track", {
+                            detail: {
+                                ...data,
+                                points: enrichedPoints,
+                                elevationGain: totalGain,
+                                elevationLoss: totalLoss,
+                                maxElevation: maxEle,
+                            }
+                          });
+                          window.dispatchEvent(event);
+                        }
+                    }, 1500);
+                }
             }
         },
         []
