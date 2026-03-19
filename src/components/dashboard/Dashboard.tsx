@@ -85,27 +85,27 @@ export default function Dashboard() {
     }, [handleFileUpload]);
 
     return (
-        <div className="min-h-screen bg-[#0a0a0f] text-white overflow-hidden">
+        <div className="min-h-screen bg-[#0a0a0f] text-white overflow-hidden pb-10">
             {/* Header */}
-            <header className="relative z-10 px-6 py-4 border-b border-white/[0.06]">
+            <header className="relative z-10 px-4 py-3 md:px-6 md:py-4 border-b border-white/[0.06]">
                 <div className="flex items-center justify-between max-w-[1800px] mx-auto">
                     <motion.div
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.5 }}
-                        className="flex items-center gap-3"
+                        className="flex items-center gap-2 md:gap-3"
                     >
                         <div className="relative">
-                            <div className="p-2 rounded-xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-500/20">
-                                <Mountain className="w-5 h-5 text-cyan-400" />
+                            <div className="p-1.5 md:p-2 rounded-xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-500/20">
+                                <Mountain className="w-4 h-4 md:w-5 md:h-5 text-cyan-400" />
                             </div>
-                            <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#0a0a0f] animate-pulse" />
+                            <div className="absolute -top-0.5 -right-0.5 w-2 w-2 md:w-2.5 md:h-2.5 rounded-full bg-emerald-400 border-2 border-[#0a0a0f] animate-pulse" />
                         </div>
                         <div>
-                            <h1 className="text-xl font-black tracking-tighter bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent">
+                            <h1 className="text-sm md:text-xl font-black tracking-tighter bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent uppercase">
                                 QUNCHO
                             </h1>
-                            <p className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-medium">
+                            <p className="hidden md:block text-[10px] uppercase tracking-[0.2em] text-white/30 font-medium">
                                 3D GPS Visualizer
                             </p>
                         </div>
@@ -134,27 +134,23 @@ export default function Dashboard() {
                 </div>
             </header>
 
-            {/* Bento Grid Layout */}
-            <main className="p-4 md:p-6 max-w-[1800px] mx-auto">
+            {/* Bento Grid Layout - Responsive Stack on Mobile, Grid on Desktop */}
+            <main className="p-4 md:p-6 max-w-[1800px] mx-auto min-h-[calc(100vh-88px)]">
                 <div
-                    className="grid gap-4 md:gap-5 h-[calc(100vh-88px)]"
-                    style={{
-                        gridTemplateColumns: "1fr 280px",
-                        gridTemplateRows: "1fr 200px",
-                    }}
+                    className="grid grid-cols-1 md:grid-cols-[1fr,280px] grid-rows-none md:grid-rows-[1fr,200px] gap-4 md:gap-5 h-auto md:h-[calc(100vh-88px)]"
                 >
-                    {/* Main Map Viewport - spans top-left */}
+                    {/* Main Map Viewport */}
                     <motion.div
                         initial={{ opacity: 0, scale: 0.98 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ duration: 0.6 }}
-                        className="rounded-xl overflow-hidden border border-white/10 bg-white/[0.02]"
+                        className="h-[400px] md:h-auto rounded-xl overflow-hidden border border-white/10 bg-white/[0.02]"
                     >
                         <MapViewport trackData={trackData} />
                     </motion.div>
 
-                    {/* Right Sidebar - Stats + Upload stacked */}
-                    <div className="flex flex-col gap-4 md:gap-5">
+                    {/* Sidebar - Stats + Upload */}
+                    <div className="flex flex-col gap-4 md:gap-5 order-last md:order-none">
                         {/* Upload Zone */}
                         <div className="flex-shrink-0">
                             <UploadZone
@@ -165,13 +161,13 @@ export default function Dashboard() {
                         </div>
 
                         {/* Stats Panel */}
-                        <div className="flex-1 min-h-0 overflow-auto">
+                        <div className="flex-1 min-h-0">
                             <StatsPanel trackData={trackData} />
                         </div>
                     </div>
 
                     {/* Elevation Profile - bottom spanning full width  */}
-                    <div className="col-span-2">
+                    <div className="col-span-1 md:col-span-2 order-last md:order-none h-[250px] md:h-auto">
                         <ElevationProfile data={elevationData} />
                     </div>
                 </div>

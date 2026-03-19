@@ -129,10 +129,10 @@ export default function StatsPanel({ trackData }: StatsPanelProps) {
                 )}
             </div>
 
-            {/* Stats List */}
-            <div className="px-5 py-2 space-y-0">
+            {/* Stats List - Responsive Grid */}
+            <div className="px-5 py-4">
                 {stats ? (
-                    <div className="divide-y divide-white/[0.04]">
+                    <div className="grid grid-cols-2 md:grid-cols-1 gap-4 md:gap-0 md:divide-y md:divide-white/[0.04]">
                         {stats.map((stat, i) => (
                             <StatItem key={stat.label} {...stat} delay={0.4 + i * 0.08} />
                         ))}

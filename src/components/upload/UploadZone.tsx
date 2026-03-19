@@ -70,19 +70,145 @@ export default function UploadZone({
         [handleFile]
     );
 
+    const [googleUrl, setGoogleUrl] = useState("");
+
+    const handleGoogleMapsConvert = useCallback(async () => {
+        if (!googleUrl) return;
+        setError(null);
+        console.log("Quncho: Processing URL:", googleUrl);
+        
+        try {
+            let finalUrl = googleUrl;
+
+            // 1. Expand Short Links (e.g., maps.app.goo.gl)
+            if (googleUrl.includes("maps.app.goo.gl")) {
+                onFileUpload(new File([], "expanding_link.gpx")); // UI indicator
+                const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(googleUrl)}`);
+                // The proxy doesn't always return the final URL in the body, but usually redirects. 
+                // We'll try to find any coordinates in the resulting body if possible.
+                const html = await res.text();
+                const expandedMatch = html.match(/https:\/\/www\.google\.com\/maps\/[^"]+/);
+                if (expandedMatch) finalUrl = expandedMatch[0];
+            }
+
+            let uniqueCoords: [string, string][] = [];
+
+            // 2. Extract coordinates (Global search across all patterns)
+            const patterns = [
+                /(-?\d+\.\d+),(-?\d+\.\d+)/g,
+                /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g,
+                /@(-?\d+\.\d+),(-?\d+\.\d+)/g
+            ];
+
+            for (const pattern of patterns) {
+                const matches = [...finalUrl.matchAll(pattern)];
+                matches.forEach(m => {
+                    const lat = m[1];
+                    const lon = m[2];
+                    if (Math.abs(parseFloat(lat)) <= 90 && Math.abs(parseFloat(lon)) <= 180) {
+                        uniqueCoords.push([lat, lon]);
+                    }
+                });
+            }
+
+            // 3. Fallback: Place Name Matching
+            if (uniqueCoords.length < 2) {
+                const dirPart = finalUrl.match(/\/dir\/([^/]+)\/([^/]+)/);
+                if (dirPart) {
+                    const places = [dirPart[1], dirPart[2]].map(p => p.split(/[/?@]/)[0].replace(/\+/g, " "));
+                    onFileUpload(new File([], "searching_places.gpx"));
+                    
+                    const geocodedPoints = await Promise.all(places.map(async (name) => {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`);
+                        const data = await res.json();
+                        return data.length > 0 ? [data[0].lat, data[0].lon] : null;
+                    }));
+
+                    uniqueCoords = geocodedPoints.filter(p => p !== null) as [string, string][];
+                }
+            }
+
+            // Remove duplicates
+            uniqueCoords = uniqueCoords.filter((c, index, self) =>
+                index === self.findIndex((t) => t[0] === c[0] && t[1] === c[1])
+            );
+
+            if (uniqueCoords.length < 2) {
+                throw new Error("Could not find a route in this link. Try copying the Full Link from your computer's browser.");
+            }
+
+            onFileUpload(new File([], "loading_google_import.gpx"));
+
+            const coordsString = uniqueCoords.slice(0, 15).map(c => `${c[1]},${c[0]}`).join(";");
+            const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
+            const data = await res.json();
+
+            if (!data.routes || data.routes.length === 0) {
+                throw new Error("Could not generate a road route from these points.");
+            }
+
+            const routePoints = data.routes[0].geometry.coordinates;
+      
+            // 3. Transform into our track format
+            const mockGpx: any = {
+                name: "Google Maps Route",
+                points: routePoints.map((p: any) => ({
+                    lon: p[0],
+                    lat: p[1],
+                    ele: 0, // Profile will be built by map enrichment!
+                    time: null
+                })),
+                totalDistance: data.routes[0].distance / 1000,
+                elevationGain: 0,
+                duration: data.routes[0].duration,
+                estimatedPace: (data.routes[0].duration / 60) / (data.routes[0].distance / 1000),
+                startPoint: { lat: routePoints[0][1], lon: routePoints[0][0], ele: 0, time: null },
+                endPoint: { lat: routePoints[routePoints.length - 1][1], lon: routePoints[routePoints.length - 1][0], ele: 0, time: null }
+            };
+
+            // Notify dashboard with the virtual track
+            const event = new CustomEvent("enrich-track", { detail: mockGpx });
+            window.dispatchEvent(event);
+            
+            setGoogleUrl("");
+        } catch (err: any) {
+            setError(err.message || "Failed to convert link.");
+            onFileUpload(new File([], "reset")); // Stop loading state
+        }
+    }, [googleUrl, onFileUpload]);
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.5 }}
-            className="h-full"
+            className="h-full flex flex-col gap-3"
         >
+            {/* Google Maps Input */}
+            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-white/[0.03] border border-white/10 group focus-within:border-cyan-500/50 transition-colors">
+                <input 
+                    type="text" 
+                    placeholder="Paste Google Maps Direction Link..." 
+                    className="flex-1 bg-transparent border-none outline-none text-[10px] text-white/70 px-2 placeholder:text-white/20"
+                    value={googleUrl}
+                    onChange={(e) => setGoogleUrl(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleGoogleMapsConvert()}
+                />
+                <button 
+                    onClick={handleGoogleMapsConvert}
+                    disabled={!googleUrl || isLoading}
+                    className="px-3 py-1.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-[9px] font-bold uppercase tracking-wider transition-all disabled:opacity-30"
+                >
+                    {isLoading ? "Wait" : "Convert"}
+                </button>
+            </div>
+
             <div
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 className={`
-          relative h-full rounded-xl border-2 border-dashed 
+          relative flex-1 rounded-xl border-2 border-dashed 
           transition-all duration-300 ease-out cursor-pointer
           flex flex-col items-center justify-center gap-3 p-6
           group overflow-hidden
