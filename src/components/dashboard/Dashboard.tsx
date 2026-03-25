@@ -85,9 +85,9 @@ export default function Dashboard() {
     }, [handleFileUpload]);
 
     return (
-        <div className="min-h-screen bg-[#0a0a0f] text-white overflow-hidden pb-10">
+        <div className="min-h-screen bg-[#0a0a0f] text-white overflow-y-auto pb-10">
             {/* Header */}
-            <header className="relative z-10 px-4 py-3 md:px-6 md:py-4 border-b border-white/[0.06]">
+            <header className="relative z-10 px-4 py-3 md:px-6 md:py-4 border-b border-white/[0.06] sticky top-0 bg-[#0a0a0f]/80 backdrop-blur-md">
                 <div className="flex items-center justify-between max-w-[1800px] mx-auto">
                     <motion.div
                         initial={{ opacity: 0, x: -20 }}

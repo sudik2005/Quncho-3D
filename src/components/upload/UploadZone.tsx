@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileUp, CheckCircle2, AlertCircle } from "lucide-react";
+import { 
+    Upload, 
+    FileUp, 
+    X, 
+    CheckCircle2, 
+    AlertCircle,
+    Link as LinkIcon
+} from "lucide-react";
 
 interface UploadZoneProps {
     onFileUpload: (file: File) => void;
@@ -75,108 +82,124 @@ export default function UploadZone({
     const handleGoogleMapsConvert = useCallback(async () => {
         if (!googleUrl) return;
         setError(null);
-        onFileUpload(new File([], "loading_google_import.gpx")); // Show loading state
+        onFileUpload(new File([], "loading_route_data.gpx")); 
 
         try {
-            let finalDataStr = googleUrl;
+            let finalUrl = googleUrl;
+            let htmlContent = "";
 
-            // 1. Expand Short Links (using two proxies for redundancy)
-            if (googleUrl.includes("goo.gl") || googleUrl.includes("maps.app")) {
-                try {
-                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(googleUrl)}`);
-                    const data = await res.json();
-                    if (data.contents) finalDataStr = data.contents;
-                } catch (e) {
-                    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(googleUrl)}`);
-                    finalDataStr = await res.text();
+            // 1. Triple-Proxy Expansion Engine
+            if (googleUrl.includes("maps.app.goo.gl") || googleUrl.includes("goo.gl/maps")) {
+                const proxyServices = [
+                    `https://api.allorigins.win/get?url=${encodeURIComponent(googleUrl)}`,
+                    `https://corsproxy.io/?${encodeURIComponent(googleUrl)}`,
+                    `https://proxy.cors.sh/${googleUrl}`
+                ];
+                for (const svc of proxyServices) {
+                    try {
+                        const res = await fetch(svc);
+                        const data = svc.includes("allorigins") ? await res.json() : { contents: await res.text() };
+                        htmlContent = data.contents || data;
+                        const expandedMatch = htmlContent.match(/https:\/\/www\.google\.[a-z.]+\/maps\/[^"']+/i);
+                        if (expandedMatch) { finalUrl = expandedMatch[0]; break; }
+                    } catch (e) { continue; }
                 }
             }
 
-            let uniqueCoords: [string, string][] = [];
+            // 2. Optimized Sequential Harvester
+            const scanSource = finalUrl + " " + htmlContent;
+            const coordRegex = /(-?\d+\.\d{4,})[%,!/d]*,\s?(-?\d+\.\d{4,})/g;
+            let sequentialCoords: [number, number][] = [];
+            
+            // Capture every Lat/Lon pair in the exact order they appear
+            const matches = [...scanSource.matchAll(coordRegex)];
+            matches.forEach(m => {
+                const lat = parseFloat(m[1]);
+                const lon = parseFloat(m[2]);
+                if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+                    sequentialCoords.push([lat, lon]);
+                }
+            });
 
-            // 2. Ultra-Aggressive Global Coordinate Search
-            // This captures almost ANY pair of GPS coordinates found in URLs or JSON
-            const patterns = [
-                /(-?\d+\.\d{4,}),\s?(-?\d+\.\d{4,})/g, // Global Lat/Lon with 4+ decimal places
-                /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g,     // Google specific
-                /\["(-?\d+\.\d+)","(-?\d+\.\d+)"\]/g   // Google JSON specific
-            ];
-
-            for (const pattern of patterns) {
-                const matches = [...finalDataStr.matchAll(pattern)];
-                matches.forEach(m => {
-                    const lat = m[1];
-                    const lon = m[2];
-                    if (Math.abs(parseFloat(lat)) <= 90 && Math.abs(parseFloat(lon)) <= 180) {
-                        uniqueCoords.push([lat, lon]);
-                    }
-                });
-            }
-
-            // 3. Place Name Fallback
-            if (uniqueCoords.length < 2) {
-                const chunks = finalDataStr.split(/[\/\\?&=+]/).filter(c => c.length > 4 && !c.includes("google") && !c.includes("maps"));
-                if (chunks.length >= 2) {
-                    onFileUpload(new File([], "searching_places.gpx"));
-                    const geocodedPoints = await Promise.all(chunks.slice(0, 3).map(async (chunk) => {
-                        const name = chunk.split(/[!@#]/)[0].replace(/\+/g, " ");
-                        if (name.length < 3) return null;
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`);
-                        const data = await res.json();
-                        return data.length > 0 ? [data[0].lat, data[0].lon] : null;
+            // 3. Fallback: Place Name Extraction (only if no coordinates found)
+            if (sequentialCoords.length === 0) {
+                const candidates = finalUrl.split(/[\/\\?&=+!]/).filter(c => c.length > 5 && !c.includes("google") && !c.includes("maps"));
+                if (candidates.length > 0) {
+                    const searchResults = await Promise.all(candidates.slice(0, 2).map(async (q) => {
+                        try {
+                            const name = q.split("@")[0].replace(/\+/g, " ");
+                            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`);
+                            const data = await res.json();
+                            return data.length > 0 ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] as [number, number] : null;
+                        } catch (e) { return null; }
                     }));
-                    uniqueCoords = geocodedPoints.filter(p => p !== null) as [string, string][];
+                    sequentialCoords = searchResults.filter(r => r !== null) as [number, number][];
                 }
             }
-            
-            // Deduplicate and filter noise
-            uniqueCoords = uniqueCoords.filter((c, index, self) =>
-                index === self.findIndex((t) => t[0] === c[0] && t[1] === c[1])
-            ).slice(0, 20);
 
-            if (uniqueCoords.length < 2) {
-                throw new Error("Route not found. Make sure the link shows 'Directions' between points.");
+            // 4. Deduplicate while preserving Natural Order
+            const uniqueCoords = sequentialCoords.filter((c, index, self) =>
+                index === self.findIndex((t) => Math.abs(t[0] - c[0]) < 0.0001 && Math.abs(t[1] - c[1]) < 0.0001)
+            );
+
+            if (uniqueCoords.length === 0) {
+                throw new Error("Could not find a location. Try sharing a different Directions link.");
             }
 
-            onFileUpload(new File([], "processing_route.gpx"));
-            const coordsString = uniqueCoords.map(c => `${c[1]},${c[0]}`).join(";");
-            const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
-            const data = await res.json();
+            // 5. Build Final Map View
+            onFileUpload(new File([], "rendering_3d_route.gpx"));
+            let finalTrack: any;
 
-            if (!data.routes || data.routes.length === 0) {
-                throw new Error("Could not generate a road route from these points.");
+            // Detect if it's likely a direction (multiple distict points)
+            const isRouteIntent = uniqueCoords.length >= 2 || finalUrl.includes("/dir/") || finalUrl.includes("saddr=") || htmlContent.includes("/dir/");
+
+            if (isRouteIntent && uniqueCoords.length >= 2) {
+                // Connect the points sequentially
+                const coordsString = uniqueCoords.slice(0, 15).map(c => `${c[1]},${c[0]}`).join(";");
+                const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
+                const data = await res.json();
+                
+                if (!data.routes || data.routes.length === 0) throw new Error("Could not build a road route between these points.");
+                
+                const routePoints = data.routes[0].geometry.coordinates;
+                finalTrack = {
+                    name: "Shared Route",
+                    points: routePoints.map((p: any) => ({ lon: p[0], lat: p[1], ele: 0, time: null })),
+                    totalDistance: data.routes[0].distance / 1000,
+                    elevationGain: 0, duration: data.routes[0].duration, estimatedPace: 0,
+                    startPoint: { lat: uniqueCoords[0][0], lon: uniqueCoords[0][1], ele: 0, time: null },
+                    endPoint: { lat: uniqueCoords[uniqueCoords.length - 1][0], lon: uniqueCoords[uniqueCoords.length - 1][1], ele: 0, time: null }
+                };
+            } else {
+                // Focus on the SINGLE destination
+                const [lat, lon] = uniqueCoords[uniqueCoords.length - 1]; // Use the LAST coordinate as the destination
+                finalTrack = {
+                    name: "Pinned Location",
+                    points: [{ lat, lon, ele: 0, time: null }, { lat: lat + 0.0001, lon: lon + 0.0001, ele: 0, time: null }],
+                    totalDistance: 0, elevationGain: 0, duration: 0, estimatedPace: 0,
+                    startPoint: { lat, lon, ele: 0, time: null },
+                    endPoint: { lat, lon, ele: 0, time: null }
+                };
             }
 
-            const routePoints = data.routes[0].geometry.coordinates;
-      
-            // 3. Transform into our track format
-            const mockGpx: any = {
-                name: "Google Maps Route",
-                points: routePoints.map((p: any) => ({
-                    lon: p[0],
-                    lat: p[1],
-                    ele: 0, // Profile will be built by map enrichment!
-                    time: null
-                })),
-                totalDistance: data.routes[0].distance / 1000,
-                elevationGain: 0,
-                duration: data.routes[0].duration,
-                estimatedPace: (data.routes[0].duration / 60) / (data.routes[0].distance / 1000),
-                startPoint: { lat: routePoints[0][1], lon: routePoints[0][0], ele: 0, time: null },
-                endPoint: { lat: routePoints[routePoints.length - 1][1], lon: routePoints[routePoints.length - 1][0], ele: 0, time: null }
-            };
-
-            // Notify dashboard with the virtual track
-            const event = new CustomEvent("enrich-track", { detail: mockGpx });
-            window.dispatchEvent(event);
-            
+            window.dispatchEvent(new CustomEvent("enrich-track", { detail: finalTrack }));
             setGoogleUrl("");
         } catch (err: any) {
             setError(err.message || "Failed to convert link.");
-            // Send a pseudo-file that the parent will ignore to clear its loading state
             onFileUpload(new File([], "")); 
         }
     }, [googleUrl, onFileUpload]);
+
+
+    // 1. Auto-Detect Engine
+    useEffect(() => {
+        if (googleUrl.includes("google.com/maps") || googleUrl.includes("goo.gl/maps") || googleUrl.includes("maps.app.goo.gl")) {
+            const timer = setTimeout(() => {
+                handleGoogleMapsConvert();
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [googleUrl, handleGoogleMapsConvert]);
 
     return (
         <motion.div
@@ -187,21 +210,19 @@ export default function UploadZone({
         >
             {/* Google Maps Input */}
             <div className="flex items-center gap-2 p-1.5 rounded-lg bg-white/[0.03] border border-white/10 group focus-within:border-cyan-500/50 transition-colors">
+                <div className="pl-2">
+                    <LinkIcon className="w-3 h-3 text-white/20 group-focus-within:text-cyan-400" />
+                </div>
                 <input 
                     type="text" 
-                    placeholder="Paste Google Maps Direction Link..." 
+                    placeholder="Paste Google Maps link here..." 
                     className="flex-1 bg-transparent border-none outline-none text-[10px] text-white/70 px-2 placeholder:text-white/20"
                     value={googleUrl}
                     onChange={(e) => setGoogleUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleGoogleMapsConvert()}
                 />
-                <button 
-                    onClick={handleGoogleMapsConvert}
-                    disabled={!googleUrl || isLoading}
-                    className="px-3 py-1.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-[9px] font-bold uppercase tracking-wider transition-all disabled:opacity-30"
-                >
-                    {isLoading ? "Wait" : "Convert"}
-                </button>
+                <div className={`px-2 py-1 rounded text-[8px] font-bold uppercase transition-all ${isLoading ? "text-cyan-400 animate-pulse" : "text-white/10"}`}>
+                    {isLoading ? "Expanding link..." : "Direct Preview"}
+                </div>
             </div>
 
             <div
