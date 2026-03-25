@@ -75,25 +75,34 @@ export default function UploadZone({
     const handleGoogleMapsConvert = useCallback(async () => {
         if (!googleUrl) return;
         setError(null);
-        console.log("Quncho: Processing URL:", googleUrl);
+        console.log("Quncho: Deep Parsing URL:", googleUrl);
         
         try {
             let finalUrl = googleUrl;
 
-            // 1. Expand Short Links (e.g., maps.app.goo.gl)
-            if (googleUrl.includes("maps.app.goo.gl")) {
-                onFileUpload(new File([], "expanding_link.gpx")); // UI indicator
-                const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(googleUrl)}`);
-                // The proxy doesn't always return the final URL in the body, but usually redirects. 
-                // We'll try to find any coordinates in the resulting body if possible.
-                const html = await res.text();
-                const expandedMatch = html.match(/https:\/\/www\.google\.com\/maps\/[^"]+/);
-                if (expandedMatch) finalUrl = expandedMatch[0];
+            // 1. Double-Proxy Expansion (for maps.app.goo.gl)
+            if (googleUrl.includes("maps.app.goo.gl") || googleUrl.includes("goo.gl/maps")) {
+                onFileUpload(new File([], "expanding_link.gpx"));
+                try {
+                    // Try Proxy 1
+                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(googleUrl)}`);
+                    const data = await res.json();
+                    if (data.contents) {
+                        const expandedMatch = data.contents.match(/https:\/\/www\.google\.[a-z.]+\/maps\/[^"]+/);
+                        if (expandedMatch) finalUrl = expandedMatch[0];
+                    }
+                } catch (e) {
+                    // Fallback to Proxy 2
+                    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(googleUrl)}`);
+                    const html = await res.text();
+                    const expandedMatch = html.match(/https:\/\/www\.google\.[a-z.]+\/maps\/[^"]+/);
+                    if (expandedMatch) finalUrl = expandedMatch[0];
+                }
             }
 
             let uniqueCoords: [string, string][] = [];
 
-            // 2. Extract coordinates (Global search across all patterns)
+            // 2. Global Coordinate Search
             const patterns = [
                 /(-?\d+\.\d+),(-?\d+\.\d+)/g,
                 /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g,
@@ -111,34 +120,33 @@ export default function UploadZone({
                 });
             }
 
-            // 3. Fallback: Place Name Matching
+            // 3. Permissive Place Extraction (Fallback)
             if (uniqueCoords.length < 2) {
-                const dirPart = finalUrl.match(/\/dir\/([^/]+)\/([^/]+)/);
-                if (dirPart) {
-                    const places = [dirPart[1], dirPart[2]].map(p => p.split(/[/?@]/)[0].replace(/\+/g, " "));
+                // Look for place segments in the URL
+                const chunks = finalUrl.split("/").filter(c => c.length > 3 && !c.includes("google") && !c.includes("maps"));
+                if (chunks.length >= 2) {
                     onFileUpload(new File([], "searching_places.gpx"));
-                    
-                    const geocodedPoints = await Promise.all(places.map(async (name) => {
+                    const geocodedPoints = await Promise.all(chunks.slice(0, 3).map(async (chunk) => {
+                        const name = chunk.split(/[/?@!]/)[0].replace(/\+/g, " ");
+                        if (name.length < 3) return null;
                         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`);
                         const data = await res.json();
                         return data.length > 0 ? [data[0].lat, data[0].lon] : null;
                     }));
-
                     uniqueCoords = geocodedPoints.filter(p => p !== null) as [string, string][];
                 }
             }
-
+            
             // Remove duplicates
             uniqueCoords = uniqueCoords.filter((c, index, self) =>
                 index === self.findIndex((t) => t[0] === c[0] && t[1] === c[1])
             );
 
             if (uniqueCoords.length < 2) {
-                throw new Error("Could not find a route in this link. Try copying the Full Link from your computer's browser.");
+                throw new Error("Could not extract a route. Try using the Full Link from your address bar.");
             }
 
             onFileUpload(new File([], "loading_google_import.gpx"));
-
             const coordsString = uniqueCoords.slice(0, 15).map(c => `${c[1]},${c[0]}`).join(";");
             const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
             const data = await res.json();
