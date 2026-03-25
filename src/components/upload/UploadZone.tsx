@@ -75,13 +75,13 @@ export default function UploadZone({
     const handleGoogleMapsConvert = useCallback(async () => {
         if (!googleUrl) return;
         setError(null);
-        
+        onFileUpload(new File([], "loading_google_import.gpx")); // Show loading state
+
         try {
             let finalDataStr = googleUrl;
 
-            // 1. Expand Short Links with aggressive metadata scraping
-            if (googleUrl.includes("maps.app.goo.gl") || googleUrl.includes("goo.gl/maps")) {
-                onFileUpload(new File([], "loading_google_import.gpx")); // Loading UI
+            // 1. Expand Short Links (using two proxies for redundancy)
+            if (googleUrl.includes("goo.gl") || googleUrl.includes("maps.app")) {
                 try {
                     const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(googleUrl)}`);
                     const data = await res.json();
@@ -94,12 +94,12 @@ export default function UploadZone({
 
             let uniqueCoords: [string, string][] = [];
 
-            // 2. Scan everything (URL or HTML Content) for coordinates
-            // This captures [lat,lon], !3d!4d, and many other Google metadata formats
+            // 2. Ultra-Aggressive Global Coordinate Search
+            // This captures almost ANY pair of GPS coordinates found in URLs or JSON
             const patterns = [
-                /(-?\d+\.\d+),(-?\d+\.\d+)/g,
-                /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g,
-                /\["(-?\d+\.\d+)","(-?\d+\.\d+)"\]/g // Google JSON format
+                /(-?\d+\.\d{4,}),\s?(-?\d+\.\d{4,})/g, // Global Lat/Lon with 4+ decimal places
+                /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g,     // Google specific
+                /\["(-?\d+\.\d+)","(-?\d+\.\d+)"\]/g   // Google JSON specific
             ];
 
             for (const pattern of patterns) {
@@ -113,13 +113,14 @@ export default function UploadZone({
                 });
             }
 
-            // 3. Fallback: Place Name Matching
+            // 3. Place Name Fallback
             if (uniqueCoords.length < 2) {
-                const dirPart = finalDataStr.match(/\/dir\/([^/]+)\/([^/]+)/) || finalDataStr.match(/dir\\\/([^/]+)\\\/([^/]+)/);
-                if (dirPart) {
-                    const places = [dirPart[1], dirPart[2]].map(p => p.split(/[/?@!\\]/)[0].replace(/\+/g, " "));
+                const chunks = finalDataStr.split(/[\/\\?&=+]/).filter(c => c.length > 4 && !c.includes("google") && !c.includes("maps"));
+                if (chunks.length >= 2) {
                     onFileUpload(new File([], "searching_places.gpx"));
-                    const geocodedPoints = await Promise.all(places.map(async (name) => {
+                    const geocodedPoints = await Promise.all(chunks.slice(0, 3).map(async (chunk) => {
+                        const name = chunk.split(/[!@#]/)[0].replace(/\+/g, " ");
+                        if (name.length < 3) return null;
                         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`);
                         const data = await res.json();
                         return data.length > 0 ? [data[0].lat, data[0].lon] : null;
@@ -128,17 +129,17 @@ export default function UploadZone({
                 }
             }
             
-            // Remove duplicates
+            // Deduplicate and filter noise
             uniqueCoords = uniqueCoords.filter((c, index, self) =>
                 index === self.findIndex((t) => t[0] === c[0] && t[1] === c[1])
-            );
+            ).slice(0, 20);
 
             if (uniqueCoords.length < 2) {
-                throw new Error("Could not find a route. Ensure you've shared a link with 'Directions' enabled.");
+                throw new Error("Route not found. Make sure the link shows 'Directions' between points.");
             }
 
             onFileUpload(new File([], "processing_route.gpx"));
-            const coordsString = uniqueCoords.slice(0, 15).map(c => `${c[1]},${c[0]}`).join(";");
+            const coordsString = uniqueCoords.map(c => `${c[1]},${c[0]}`).join(";");
             const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
             const data = await res.json();
 
@@ -172,7 +173,8 @@ export default function UploadZone({
             setGoogleUrl("");
         } catch (err: any) {
             setError(err.message || "Failed to convert link.");
-            onFileUpload(new File([], "reset")); // Stop loading state
+            // Send a pseudo-file that the parent will ignore to clear its loading state
+            onFileUpload(new File([], "")); 
         }
     }, [googleUrl, onFileUpload]);
 
